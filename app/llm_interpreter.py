@@ -101,7 +101,7 @@ class LLMInterpreter:
 
         # Optional Gemini fallback
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
         # Optional Local LLM URL (Ollama / vLLM / Local OpenAI compatible)
         self.local_llm_url = os.getenv("LOCAL_LLM_URL")
