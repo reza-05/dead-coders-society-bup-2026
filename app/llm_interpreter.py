@@ -3,10 +3,13 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
 
 from groq import Groq
 from app.models import BatteryData, DirectiveInterpretation
 from app.guardrails import guardrail_directives
+
+load_dotenv()
 
 logger = logging.getLogger("gridwise.llm")
 
@@ -71,8 +74,8 @@ Output MUST be a valid JSON object with the key "directives" containing a list o
 class LLMInterpreter:
     def __init__(self):
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.groq_primary_model = os.getenv("GROQ_PRIMARY_MODEL", "llama-3.3-70b-versatile")
-        self.groq_fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
+        self.groq_primary_model = os.getenv("GROQ_PRIMARY_MODEL", "openai/gpt-oss-120b")
+        self.groq_fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
         self.groq_timeout = float(os.getenv("GROQ_TIMEOUT_SECONDS", "4.0"))
 
         self.groq_client = Groq(api_key=self.groq_api_key, timeout=self.groq_timeout) if self.groq_api_key else None
