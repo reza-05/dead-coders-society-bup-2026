@@ -89,6 +89,16 @@ class LLMInterpreter:
         self.groq_fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
         self.groq_timeout = float(os.getenv("GROQ_TIMEOUT_SECONDS", "4.0"))
 
+        # Optional Free High-Speed Cloud Fallbacks
+        self.cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+        self.cerebras_model = os.getenv("CEREBRAS_MODEL", "llama3.1-8b")
+
+        self.sambanova_api_key = os.getenv("SAMBANOVA_API_KEY")
+        self.sambanova_model = os.getenv("SAMBANOVA_MODEL", "Meta-Llama-3.1-8B-Instruct")
+
+        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        self.openrouter_model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+
         # Optional Gemini fallback
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
@@ -123,8 +133,15 @@ class LLMInterpreter:
 
     def interpret(self, operator_notes: List[str], battery: BatteryData) -> List[DirectiveInterpretation]:
         """
-        Parses operator notes through Multi-Tier LLM Architecture:
-        Cache -> Groq Multi-Key (120B/20B) -> Gemini -> Local LLM -> Offline Parser
+        Multi-Tier Resilient Pipeline:
+        0. In-Memory Cache (0ms, 0 Quota)
+        1. Groq Cloud (Multi-key rotation, 120B -> 20B)
+        2. Cerebras Cloud (World's fastest LLaMA inference, free tier)
+        3. SambaNova Cloud (Fast LLaMA inference, free tier)
+        4. OpenRouter (Free LLaMA models)
+        5. Google Gemini (Gemini 2.0 Flash)
+        6. Local LLM (Ollama / vLLM)
+        7. Deterministic Safety Net
         """
         # 0. Check in-memory cache
         cache_key = f"{tuple(operator_notes)}|{battery.capacity_kwh}|{battery.minimum_energy_kwh}"
@@ -140,7 +157,7 @@ class LLMInterpreter:
             try:
                 raw_directives = self._call_groq(client, operator_notes, battery, self.groq_primary_model)
             except Exception as e:
-                logger.warning(f"Groq primary model ({self.groq_primary_model}) error: {e}. Rotating / Trying fallback.")
+                logger.warning(f"Groq primary error: {e}. Trying secondary model.")
                 self._rotate_groq_key()
                 client = self._get_active_groq_client()
                 try:
@@ -148,25 +165,57 @@ class LLMInterpreter:
                 except Exception as e2:
                     logger.error(f"Groq fallback model error: {e2}")
 
-        # 2. Tier 2: Google Gemini Fallback
+        # 2. Tier 2: Cerebras Inference (Free & Ultra-Fast)
+        if not raw_directives and self.cerebras_api_key:
+            try:
+                logger.info("Activating Tier 2 Fallback: Cerebras Cloud API")
+                raw_directives = self._call_openai_compatible(
+                    "https://api.cerebras.ai/v1", self.cerebras_api_key, self.cerebras_model, operator_notes, battery
+                )
+            except Exception as e:
+                logger.error(f"Cerebras fallback failed: {e}")
+
+        # 3. Tier 3: SambaNova Cloud (Free & Ultra-Fast)
+        if not raw_directives and self.sambanova_api_key:
+            try:
+                logger.info("Activating Tier 3 Fallback: SambaNova Cloud API")
+                raw_directives = self._call_openai_compatible(
+                    "https://api.sambanova.ai/v1", self.sambanova_api_key, self.sambanova_model, operator_notes, battery
+                )
+            except Exception as e:
+                logger.error(f"SambaNova fallback failed: {e}")
+
+        # 4. Tier 4: OpenRouter Free Models
+        if not raw_directives and self.openrouter_api_key:
+            try:
+                logger.info("Activating Tier 4 Fallback: OpenRouter Free API")
+                raw_directives = self._call_openai_compatible(
+                    "https://openrouter.ai/api/v1", self.openrouter_api_key, self.openrouter_model, operator_notes, battery
+                )
+            except Exception as e:
+                logger.error(f"OpenRouter fallback failed: {e}")
+
+        # 5. Tier 5: Google Gemini Fallback
         if not raw_directives and self.google_api_key:
             try:
-                logger.info("Activating Tier 2 Fallback: Google Gemini API")
+                logger.info("Activating Tier 5 Fallback: Google Gemini API")
                 raw_directives = self._call_gemini(operator_notes, battery)
             except Exception as e:
                 logger.error(f"Gemini fallback failed: {e}")
 
-        # 3. Tier 3: Local LLM Fallback (Ollama / vLLM / Local server)
+        # 6. Tier 6: Local LLM Fallback (Ollama / vLLM / Local server)
         if not raw_directives and self.local_llm_url:
             try:
-                logger.info(f"Activating Tier 3 Fallback: Local LLM at {self.local_llm_url}")
-                raw_directives = self._call_local_llm(operator_notes, battery)
+                logger.info(f"Activating Tier 6 Fallback: Local LLM at {self.local_llm_url}")
+                raw_directives = self._call_openai_compatible(
+                    self.local_llm_url, "", self.local_llm_model, operator_notes, battery
+                )
             except Exception as e:
                 logger.error(f"Local LLM fallback failed: {e}")
 
-        # 4. Tier 4: High-Precision Deterministic Emergency Parser
+        # 7. Tier 7: High-Precision Deterministic Emergency Parser
         if not raw_directives:
-            logger.warning("Activating Tier 4 Safety Net: High-precision deterministic parser")
+            logger.warning("Activating Tier 7 Safety Net: High-precision deterministic parser")
             raw_directives = self._fallback_rule_parser(operator_notes)
 
         # Store in cache if extraction succeeded
@@ -207,20 +256,30 @@ class LLMInterpreter:
                 return data["directive_interpretation"]
         return []
 
-    def _call_local_llm(self, operator_notes: List[str], battery: BatteryData) -> List[Dict[str, Any]]:
+    def _call_openai_compatible(
+        self,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        operator_notes: List[str],
+        battery: BatteryData
+    ) -> List[Dict[str, Any]]:
         import httpx
 
         user_prompt = (
             f"Battery System Specs: capacity_kwh = {battery.capacity_kwh}, "
-            f"minimum_energy_kwh = {battery.minimum_energy_kwh}\n\n"
+            f"minimum_energy_kwh = {battery.minimum_energy_kwh}, "
+            f"max_charge_kwh_per_hour = {battery.max_charge_kwh_per_hour}, "
+            f"max_discharge_kwh_per_hour = {battery.max_discharge_kwh_per_hour}\n\n"
             f"Interpret the following operator notes:\n"
         )
         for idx, note in enumerate(operator_notes):
             user_prompt += f"Note {idx}: \"{note}\"\n"
 
-        url = f"{self.local_llm_url.rstrip('/')}/chat/completions"
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         payload = {
-            "model": self.local_llm_model,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
@@ -229,7 +288,7 @@ class LLMInterpreter:
             "temperature": 0.0
         }
         with httpx.Client(timeout=self.groq_timeout) as http_client:
-            res = http_client.post(url, json=payload)
+            res = http_client.post(url, headers=headers, json=payload)
             res.raise_for_status()
             content = res.json()["choices"][0]["message"]["content"]
             data = json.loads(content)
