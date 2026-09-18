@@ -28,6 +28,7 @@ Supported directive types:
 
 2. minimum_battery_reserve: Keep battery energy at or above a required level during specific hours.
    structured_adjustment: {"hours": [int, ...], "minimum_energy_kwh": float}
+   IMPORTANT: If the reserve is specified as a percentage of battery capacity (e.g. "at least 50% of the battery capacity" where capacity is 200 kWh), compute the exact value: (percentage / 100) * capacity_kwh (e.g. 0.50 * 200 = 100 kWh).
 
 3. no_charge_window: Battery charging is unavailable during specific hours.
    structured_adjustment: {"hours": [int, ...]}
@@ -93,18 +94,18 @@ class LLMInterpreter:
         # 1. Try Groq Primary
         if self.groq_client:
             try:
-                raw_directives = self._call_groq(operator_notes, self.groq_primary_model)
+                raw_directives = self._call_groq(operator_notes, battery, self.groq_primary_model)
             except Exception as e:
                 logger.warning(f"Groq primary model ({self.groq_primary_model}) failed: {e}. Trying fallback.")
                 try:
-                    raw_directives = self._call_groq(operator_notes, self.groq_fallback_model)
+                    raw_directives = self._call_groq(operator_notes, battery, self.groq_fallback_model)
                 except Exception as e2:
                     logger.error(f"Groq fallback model failed: {e2}")
 
         # 2. Try Gemini fallback if Groq failed or not configured
         if not raw_directives and self.google_api_key:
             try:
-                raw_directives = self._call_gemini(operator_notes)
+                raw_directives = self._call_gemini(operator_notes, battery)
             except Exception as e:
                 logger.error(f"Gemini fallback failed: {e}")
 
@@ -116,8 +117,14 @@ class LLMInterpreter:
         # Apply strict deterministic guardrails
         return guardrail_directives(raw_directives, operator_notes, battery)
 
-    def _call_groq(self, operator_notes: List[str], model_name: str) -> List[Dict[str, Any]]:
-        user_prompt = "Interpret the following operator notes:\n"
+    def _call_groq(self, operator_notes: List[str], battery: BatteryData, model_name: str) -> List[Dict[str, Any]]:
+        user_prompt = (
+            f"Battery System Specs: capacity_kwh = {battery.capacity_kwh}, "
+            f"minimum_energy_kwh = {battery.minimum_energy_kwh}, "
+            f"max_charge_kwh_per_hour = {battery.max_charge_kwh_per_hour}, "
+            f"max_discharge_kwh_per_hour = {battery.max_discharge_kwh_per_hour}\n\n"
+            f"Interpret the following operator notes:\n"
+        )
         for idx, note in enumerate(operator_notes):
             user_prompt += f"Note {idx}: \"{note}\"\n"
 
@@ -141,7 +148,7 @@ class LLMInterpreter:
                 return data["directive_interpretation"]
         return []
 
-    def _call_gemini(self, operator_notes: List[str]) -> List[Dict[str, Any]]:
+    def _call_gemini(self, operator_notes: List[str], battery: BatteryData) -> List[Dict[str, Any]]:
         from google import genai
         from google.genai import types
 

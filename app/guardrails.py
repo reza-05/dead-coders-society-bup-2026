@@ -92,6 +92,9 @@ def validate_and_repair_directive(
         raw_min = raw_adj.get("minimum_energy_kwh", battery.minimum_energy_kwh)
         try:
             min_energy = float(raw_min)
+            # If specified as a ratio/fraction (e.g. 0.5 for 50%), convert to kWh
+            if 0.0 < min_energy <= 1.0 and battery.capacity_kwh > 1.0:
+                min_energy = min_energy * battery.capacity_kwh
             min_energy = max(0.0, min(battery.capacity_kwh, min_energy))
         except (ValueError, TypeError):
             min_energy = battery.minimum_energy_kwh
