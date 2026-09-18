@@ -7,7 +7,7 @@
 
 ### Team Members
 * **Md. Shifat Reza** — System Architect & Backend Lead (`shifatreza5@gmail.com`)
-* **Abrar Faiyaz Arian** — Full-Stack Engineer & UI Lead
+* **Abrar Faiyaz Arian** — Cloud Infrastructure & Deployment Engineer
 * **Ahad Kaisar Tamim** — AI & LLM Systems Engineer
 * **Anha Khan** — Optimization & Algorithm Specialist
 
