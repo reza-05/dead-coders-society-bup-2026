@@ -1,16 +1,19 @@
 import json
+from pathlib import Path
 import pytest
 from app.models import EnergyRequest
 from app.llm_interpreter import LLMInterpreter
 from app.optimizer import solve_energy_schedule
 
-SAMPLE_PATH = "/Users/md.shifatreza/Downloads/BUP_CSE_FEST_2026_Participant_Docs/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
+SAMPLE_PATH = Path(__file__).parent / "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
 
 
 def load_sample_cases():
-    with open(SAMPLE_PATH, "r") as f:
+    if not SAMPLE_PATH.exists():
+        return []
+    with open(SAMPLE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return data["cases"]
+    return data.get("cases", [])
 
 
 @pytest.fixture(scope="module")
