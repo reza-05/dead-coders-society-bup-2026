@@ -83,50 +83,100 @@ Few-shot Guidance:
 
 class LLMInterpreter:
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.groq_keys = self._load_groq_keys()
+        self.current_key_idx = 0
         self.groq_primary_model = os.getenv("GROQ_PRIMARY_MODEL", "openai/gpt-oss-120b")
         self.groq_fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
         self.groq_timeout = float(os.getenv("GROQ_TIMEOUT_SECONDS", "4.0"))
-
-        self.groq_client = Groq(api_key=self.groq_api_key, timeout=self.groq_timeout) if self.groq_api_key else None
 
         # Optional Gemini fallback
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
+        # Optional Local LLM URL (Ollama / vLLM / Local OpenAI compatible)
+        self.local_llm_url = os.getenv("LOCAL_LLM_URL")
+        self.local_llm_model = os.getenv("LOCAL_LLM_MODEL", "llama3")
+
+        # In-memory Directive Cache (saves quota & gives 0ms latency for repeated notes)
+        self._cache: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _load_groq_keys(self) -> List[str]:
+        raw_keys = [os.getenv("GROQ_API_KEYS", ""), os.getenv("GROQ_API_KEY", "")]
+        keys = []
+        for raw in raw_keys:
+            for k in raw.split(","):
+                k_clean = k.strip()
+                if k_clean and k_clean not in keys:
+                    keys.append(k_clean)
+        return keys
+
+    def _get_active_groq_client(self) -> Optional[Groq]:
+        if not self.groq_keys:
+            return None
+        key = self.groq_keys[self.current_key_idx % len(self.groq_keys)]
+        return Groq(api_key=key, timeout=self.groq_timeout)
+
+    def _rotate_groq_key(self):
+        if len(self.groq_keys) > 1:
+            self.current_key_idx = (self.current_key_idx + 1) % len(self.groq_keys)
+            logger.info(f"Rotated to next Groq API key (index {self.current_key_idx})")
+
     def interpret(self, operator_notes: List[str], battery: BatteryData) -> List[DirectiveInterpretation]:
         """
-        Parses operator notes through LLM, then applies deterministic guardrails.
+        Parses operator notes through Multi-Tier LLM Architecture:
+        Cache -> Groq Multi-Key (120B/20B) -> Gemini -> Local LLM -> Offline Parser
         """
+        # 0. Check in-memory cache
+        cache_key = f"{tuple(operator_notes)}|{battery.capacity_kwh}|{battery.minimum_energy_kwh}"
+        if cache_key in self._cache:
+            logger.info("Cache hit: Returning cached directive interpretation (0ms latency)")
+            return guardrail_directives(self._cache[cache_key], operator_notes, battery)
+
         raw_directives: List[Dict[str, Any]] = []
 
-        # 1. Try Groq Primary
-        if self.groq_client:
+        # 1. Tier 1: Groq Cloud with Multi-Key Rotation
+        client = self._get_active_groq_client()
+        if client:
             try:
-                raw_directives = self._call_groq(operator_notes, battery, self.groq_primary_model)
+                raw_directives = self._call_groq(client, operator_notes, battery, self.groq_primary_model)
             except Exception as e:
-                logger.warning(f"Groq primary model ({self.groq_primary_model}) failed: {e}. Trying fallback.")
+                logger.warning(f"Groq primary model ({self.groq_primary_model}) error: {e}. Rotating / Trying fallback.")
+                self._rotate_groq_key()
+                client = self._get_active_groq_client()
                 try:
-                    raw_directives = self._call_groq(operator_notes, battery, self.groq_fallback_model)
+                    raw_directives = self._call_groq(client, operator_notes, battery, self.groq_fallback_model)
                 except Exception as e2:
-                    logger.error(f"Groq fallback model failed: {e2}")
+                    logger.error(f"Groq fallback model error: {e2}")
 
-        # 2. Try Gemini fallback if Groq failed or not configured
+        # 2. Tier 2: Google Gemini Fallback
         if not raw_directives and self.google_api_key:
             try:
+                logger.info("Activating Tier 2 Fallback: Google Gemini API")
                 raw_directives = self._call_gemini(operator_notes, battery)
             except Exception as e:
                 logger.error(f"Gemini fallback failed: {e}")
 
-        # 3. Rule-based emergency fallback if external APIs are completely unreachable
+        # 3. Tier 3: Local LLM Fallback (Ollama / vLLM / Local server)
+        if not raw_directives and self.local_llm_url:
+            try:
+                logger.info(f"Activating Tier 3 Fallback: Local LLM at {self.local_llm_url}")
+                raw_directives = self._call_local_llm(operator_notes, battery)
+            except Exception as e:
+                logger.error(f"Local LLM fallback failed: {e}")
+
+        # 4. Tier 4: High-Precision Deterministic Emergency Parser
         if not raw_directives:
-            logger.warning("Falling back to deterministic rule-based parser.")
+            logger.warning("Activating Tier 4 Safety Net: High-precision deterministic parser")
             raw_directives = self._fallback_rule_parser(operator_notes)
+
+        # Store in cache if extraction succeeded
+        if raw_directives:
+            self._cache[cache_key] = raw_directives
 
         # Apply strict deterministic guardrails
         return guardrail_directives(raw_directives, operator_notes, battery)
 
-    def _call_groq(self, operator_notes: List[str], battery: BatteryData, model_name: str) -> List[Dict[str, Any]]:
+    def _call_groq(self, client: Groq, operator_notes: List[str], battery: BatteryData, model_name: str) -> List[Dict[str, Any]]:
         user_prompt = (
             f"Battery System Specs: capacity_kwh = {battery.capacity_kwh}, "
             f"minimum_energy_kwh = {battery.minimum_energy_kwh}, "
@@ -137,7 +187,7 @@ class LLMInterpreter:
         for idx, note in enumerate(operator_notes):
             user_prompt += f"Note {idx}: \"{note}\"\n"
 
-        chat_completion = self.groq_client.chat.completions.create(
+        chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
@@ -155,6 +205,39 @@ class LLMInterpreter:
                 return data["directives"]
             if "directive_interpretation" in data and isinstance(data["directive_interpretation"], list):
                 return data["directive_interpretation"]
+        return []
+
+    def _call_local_llm(self, operator_notes: List[str], battery: BatteryData) -> List[Dict[str, Any]]:
+        import httpx
+
+        user_prompt = (
+            f"Battery System Specs: capacity_kwh = {battery.capacity_kwh}, "
+            f"minimum_energy_kwh = {battery.minimum_energy_kwh}\n\n"
+            f"Interpret the following operator notes:\n"
+        )
+        for idx, note in enumerate(operator_notes):
+            user_prompt += f"Note {idx}: \"{note}\"\n"
+
+        url = f"{self.local_llm_url.rstrip('/')}/chat/completions"
+        payload = {
+            "model": self.local_llm_model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.0
+        }
+        with httpx.Client(timeout=self.groq_timeout) as http_client:
+            res = http_client.post(url, json=payload)
+            res.raise_for_status()
+            content = res.json()["choices"][0]["message"]["content"]
+            data = json.loads(content)
+            if isinstance(data, dict):
+                if "directives" in data and isinstance(data["directives"], list):
+                    return data["directives"]
+                if "directive_interpretation" in data and isinstance(data["directive_interpretation"], list):
+                    return data["directive_interpretation"]
         return []
 
     def _call_gemini(self, operator_notes: List[str], battery: BatteryData) -> List[Dict[str, Any]]:
