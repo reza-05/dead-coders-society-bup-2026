@@ -14,7 +14,7 @@
 ---
 
 ### 🎥 Architecture & Demo Video (Priority #1 Tie-Breaker)
-* **3-Minute Walkthrough Video:** [Watch on YouTube / Google Drive](https://youtu.be/placeholder-tie-breaker-video)
+* **3-Minute Walkthrough Video:** [Watch on YouTube (3-Min Presentation)](https://youtu.be/RhLFp5R4O9k)
 
 ---
 
