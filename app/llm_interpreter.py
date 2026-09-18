@@ -50,25 +50,34 @@ Time Window Rules:
   - "from midnight to 5 AM" -> [0, 1, 2, 3, 4]
 - Hours must be unique integers from 0 to 23 in ascending order.
 
-Output MUST be a valid JSON object with the key "directives" containing a list of objects, one for each note:
+Output MUST be a valid JSON object with the key "directives" containing a list of objects, one for each note in exact index order:
 {
   "directives": [
     {
       "note_index": 0,
       "applies": true,
       "directive_type": "solar_reduction",
-      "structured_adjustment": {"hours": [13, 14], "factor": 0.2},
-      "explanation": "Solar is reduced to 20% from 1 PM to 3 PM."
+      "structured_adjustment": {"hours": [12, 13], "factor": 0.25},
+      "explanation": "Solar is reduced to 25% during panel washing from noon to 2 PM."
     },
     {
       "note_index": 1,
       "applies": false,
       "directive_type": "no_op",
       "structured_adjustment": null,
-      "explanation": "Unrelated cafeteria notice."
+      "explanation": "Unrelated notice."
     }
   ]
 }
+
+Few-shot Guidance:
+- "Facilities will wash the rooftop solar panels from noon until 2 PM. During cleaning, usable solar should be treated as roughly 25% of the forecast." -> solar_reduction, hours: [12, 13], factor: 0.25
+- "Expect an 80% reduction in rooftop solar between 11 AM and 2 PM" -> solar_reduction, hours: [11, 12, 13], factor: 0.2
+- "The battery charger will be isolated from 2 AM until 5 AM" -> no_charge_window, hours: [2, 3, 4]
+- "Do not discharge the battery from 5 PM until 7 PM during relay testing" -> no_discharge_window, hours: [17, 18]
+- "From 6 PM until 9 PM, campus grid import must not exceed 155 kWh" -> max_grid_window, hours: [18, 19, 20], max_grid_kwh: 155
+- "Keep at least 50% of the battery capacity stored from 6 PM until 9 PM" (where capacity = 200 kWh) -> minimum_battery_reserve, hours: [18, 19, 20], minimum_energy_kwh: 100
+- "The sports office moved next month's registration deadline", "The library is extending book-return hours next week", "A seminar room booking was moved" -> no_op, applies: false, structured_adjustment: null
 """
 
 
