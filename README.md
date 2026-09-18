@@ -75,35 +75,42 @@ The service is fully deployed and continuously monitored on cloud infrastructure
 
 ## 3. Mathematical Optimization Formulation
 
-The scheduling engine formulates a 120-variable continuous Linear Program solved via `scipy.optimize.linprog(method='highs')`:
+The scheduling engine formulates a 120-variable continuous Linear Program (LP) solved globally via `scipy.optimize.linprog(method='highs')`:
+
+### Decision Variables ($\forall h \in \{0, \dots, 23\}$)
+* $g_h \ge 0$: Grid electricity purchased in hour $h$ (kWh)
+* $s_h \ge 0$: Solar generation utilized in hour $h$ (kWh)
+* $c_h \ge 0$: Battery energy charged in hour $h$ (kWh)
+* $d_h \ge 0$: Battery energy discharged in hour $h$ (kWh)
+* $E_h \ge 0$: Battery stored energy state at end of hour $h$ (kWh)
 
 ### Objective Function
-$$\min \sum_{h=0}^{23} \text{tariff}[h] \cdot \text{grid}[h]$$
+$$\min \sum_{h=0}^{23} \left( \text{tariff}_h \cdot g_h \right)$$
 
 ### Operational Constraints ($\forall h \in \{0, \dots, 23\}$)
 
 1. **Hourly Energy Balance:**
-   $$\text{grid}[h] + \text{solar\_used}[h] + \text{discharge}[h] = \text{demand}[h] + \text{charge}[h]$$
+   $$g_h + s_h + d_h = \text{demand}_h + c_h$$
 
 2. **Solar Resource Limits:**
-   $$0 \le \text{solar\_used}[h] \le \text{effective\_solar}[h]$$
-   $$\text{effective\_solar}[h] = \begin{cases} \text{solar}[h] \cdot \text{factor} & \text{if } h \in \text{solar\_reduction hours} \\ \text{solar}[h] & \text{otherwise} \end{cases}$$
+   $$0 \le s_h \le s_h^{\text{eff}}$$
+   $$s_h^{\text{eff}} = \begin{cases} s_h \cdot \alpha & \text{if hour } h \text{ in reduction window} \\ s_h & \text{otherwise} \end{cases}$$
 
 3. **Battery State-of-Charge (SoC) Dynamics:**
-   $$E_0 = E_{\text{initial}} + \eta \cdot \text{charge}[0] - \text{discharge}[0]$$
-   $$E_h = E_{h-1} + \eta \cdot \text{charge}[h] - \text{discharge}[h], \quad \forall h \ge 1$$
-   $$\max(\text{min\_energy}, \text{directive\_reserve}[h]) \le E_h \le \text{capacity}$$
+   $$E_0 = E_{\text{init}} + \eta \cdot c_0 - d_0$$
+   $$E_h = E_{h-1} + \eta \cdot c_h - d_h, \quad \forall h \ge 1$$
+   $$\max(E_{\min}, R_h) \le E_h \le E_{\text{cap}}$$
 
 4. **Charge and Discharge Ingress/Egress Limits:**
-   $$0 \le \text{charge}[h] \le \begin{cases} 0 & \text{if } h \in \text{no\_charge hours} \\ \text{max\_charge\_rate} & \text{otherwise} \end{cases}$$
-   $$0 \le \text{discharge}[h] \le \begin{cases} 0 & \text{if } h \in \text{no\_discharge hours} \\ \text{max\_discharge\_rate} & \text{otherwise} \end{cases}$$
+   $$0 \le c_h \le \begin{cases} 0 & \text{if hour } h \in \text{no-charge window} \\ C_{\max} & \text{otherwise} \end{cases}$$
+   $$0 \le d_h \le \begin{cases} 0 & \text{if hour } h \in \text{no-discharge window} \\ D_{\max} & \text{otherwise} \end{cases}$$
 
 5. **Grid Import Ceiling:**
-   $$0 \le \text{grid}[h] \le \begin{cases} \text{max\_grid\_kwh} & \text{if } h \in \text{max\_grid hours} \\ \infty & \text{otherwise} \end{cases}$$
+   $$0 \le g_h \le \begin{cases} G_{\max, h} & \text{if hour } h \in \text{grid-cap window} \\ \infty & \text{otherwise} \end{cases}$$
 
 6. **End-of-Day Neutrality:**
-   $$E_{23} = E_{\text{initial}}$$
-   *Prevents parasitic depletion of initial stored energy to artificially deflate costs.*
+   $$E_{23} = E_{\text{init}}$$
+   *(Guarantees cyclic sustainability and prevents artificial depletion of initial stored energy)*
 
 ---
 
@@ -113,11 +120,11 @@ The engine handles natural language directives via structured JSON generation en
 
 | Directive Type | JSON Structure | Mathematical Effect |
 | :--- | :--- | :--- |
-| `solar_reduction` | `{"hours": [int, ...], "factor": float}` | Scales available solar generation: $S_{\text{eff}}[h] = S[h] \cdot \text{factor}$ |
-| `minimum_battery_reserve` | `{"hours": [int, ...], "minimum_energy_kwh": float}` | Enforces elevated storage baseline: $E_h \ge \text{reserve}$ |
-| `no_charge_window` | `{"hours": [int, ...]} ` | Clamps battery charge power: $\text{charge}[h] = 0$ |
-| `no_discharge_window` | `{"hours": [int, ...]} ` | Clamps battery discharge power: $\text{discharge}[h] = 0$ |
-| `max_grid_window` | `{"hours": [int, ...], "max_grid_kwh": float}` | Imposes grid import ceiling: $\text{grid}[h] \le \text{cap}$ |
+| `solar_reduction` | `{"hours": [int, ...], "factor": float}` | Scales available solar generation: $s_h^{\text{eff}} = s_h \cdot \alpha$ |
+| `minimum_battery_reserve` | `{"hours": [int, ...], "minimum_energy_kwh": float}` | Enforces elevated storage baseline: $E_h \ge R_h$ |
+| `no_charge_window` | `{"hours": [int, ...]} ` | Clamps battery charge power: $c_h = 0$ |
+| `no_discharge_window` | `{"hours": [int, ...]} ` | Clamps battery discharge power: $d_h = 0$ |
+| `max_grid_window` | `{"hours": [int, ...], "max_grid_kwh": float}` | Imposes grid import ceiling: $g_h \le G_{\max, h}$ |
 | `no_op` | `null` | Informational note; zero scheduling constraint |
 
 ### Deterministic Guardrail Guarantees
