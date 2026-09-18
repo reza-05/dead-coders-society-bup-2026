@@ -158,10 +158,23 @@ Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Provide your Groq API key (minimum required for zero-friction setup):
+
+**Minimum Setup (Zero-friction local run):**
 ```env
 GROQ_API_KEY=your_groq_api_key
 ```
+
+**Production Fallback Cascade (Optional for high availability):**
+```env
+# Tier 2: Google DeepMind Gemini API
+GOOGLE_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Tier 3: OpenRouter Neural Failover
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731:free
+```
+*(Note: If optional keys are omitted, the system operates seamlessly on Groq and automatically cascades to the deterministic rule-parser if external APIs become unreachable.)*
 
 ### Step 4: Run the Application
 ```bash
