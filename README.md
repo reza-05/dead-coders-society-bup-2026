@@ -13,6 +13,11 @@
 
 ---
 
+### 🎥 Architecture & Demo Video (Priority #1 Tie-Breaker)
+* **3-Minute Walkthrough Video:** [Watch on YouTube / Google Drive](https://youtu.be/placeholder-tie-breaker-video)
+
+---
+
 ## 1. Executive Summary & Architecture
 
 **GridWise LLM** is an enterprise-grade, high-availability energy management system designed to minimize 24-hour campus electricity expenditures. The system integrates natural language understanding with rigorous mathematical optimization, decoding arbitrary, human-written operator directives and executing a global cost-minimization Linear Program (LP).
