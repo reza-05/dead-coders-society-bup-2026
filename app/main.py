@@ -63,6 +63,22 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/", tags=["Root"])
+def root():
+    """
+    Root landing response pointing to health probe and documentation.
+    """
+    return {
+        "service": "GridWise LLM - BUP Smart Campus Energy Optimizer",
+        "status": "online",
+        "endpoints": {
+            "health": "/health",
+            "optimize_energy": "/optimize-energy",
+            "documentation": "/docs"
+        }
+    }
+
+
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 def health_check():
     """
