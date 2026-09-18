@@ -89,27 +89,26 @@ $$\min \sum_{h=0}^{23} \left( \text{tariff}_h \cdot g_h \right)$$
 
 ### Operational Constraints ($\forall h \in \{0, \dots, 23\}$)
 
-1. **Hourly Energy Balance:**
-   $$g_h + s_h + d_h = \text{demand}_h + c_h$$
+1. **Hourly Energy Balance:**  
+   $g_h + s_h + d_h = \text{demand}_h + c_h$
 
-2. **Solar Resource Limits:**
-   $$0 \le s_h \le s_h^{\text{eff}}$$
-   $$s_h^{\text{eff}} = \begin{cases} s_h \cdot \alpha & \text{if hour } h \text{ in reduction window} \\ s_h & \text{otherwise} \end{cases}$$
+2. **Solar Resource Limits:**  
+   $0 \le s_h \le s_h^{\text{eff}}$, where $s_h^{\text{eff}} = s_h \cdot \alpha$ during solar reduction windows, and $s_h$ otherwise.
 
-3. **Battery State-of-Charge (SoC) Dynamics:**
-   $$E_0 = E_{\text{init}} + \eta \cdot c_0 - d_0$$
-   $$E_h = E_{h-1} + \eta \cdot c_h - d_h, \quad \forall h \ge 1$$
-   $$\max(E_{\min}, R_h) \le E_h \le E_{\text{cap}}$$
+3. **Battery State-of-Charge (SoC) Dynamics:**  
+   $E_0 = E_{\text{init}} + \eta \cdot c_0 - d_0$  
+   $E_h = E_{h-1} + \eta \cdot c_h - d_h, \quad \forall h \ge 1$  
+   $\max(E_{\min}, R_h) \le E_h \le E_{\text{cap}}$
 
-4. **Charge and Discharge Ingress/Egress Limits:**
-   $$0 \le c_h \le \begin{cases} 0 & \text{if hour } h \in \text{no-charge window} \\ C_{\max} & \text{otherwise} \end{cases}$$
-   $$0 \le d_h \le \begin{cases} 0 & \text{if hour } h \in \text{no-discharge window} \\ D_{\max} & \text{otherwise} \end{cases}$$
+4. **Charge and Discharge Ingress/Egress Limits:**  
+   $0 \le c_h \le C_{\max}$ ($c_h = 0$ in no-charge windows)  
+   $0 \le d_h \le D_{\max}$ ($d_h = 0$ in no-discharge windows)
 
-5. **Grid Import Ceiling:**
-   $$0 \le g_h \le \begin{cases} G_{\max, h} & \text{if hour } h \in \text{grid-cap window} \\ \infty & \text{otherwise} \end{cases}$$
+5. **Grid Import Ceiling:**  
+   $0 \le g_h \le G_{\max, h}$ during grid-cap windows, and unbounded otherwise.
 
-6. **End-of-Day Neutrality:**
-   $$E_{23} = E_{\text{init}}$$
+6. **End-of-Day Neutrality:**  
+   $E_{23} = E_{\text{init}}$  
    *(Guarantees cyclic sustainability and prevents artificial depletion of initial stored energy)*
 
 ---
